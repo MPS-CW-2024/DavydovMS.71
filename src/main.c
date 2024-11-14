@@ -5,10 +5,66 @@
 #include <avr/pgmspace.h>
 #include <util/delay.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "onewire.h"
 #include "LCD.h"
 #include "fan.h"
+#include "USART.h"
+
+typedef enum {
+	AUTO,
+	MANUAL
+} mode_t;
+
+mode_t currentMode = AUTO;
+uint8_t currentSpeed = 25;
+
+uint8_t bufferIndex = 0;
+char commandBuffer[64] = {};
+
+ISR(USART0_RX_vect) {
+	uint8_t data = UDR0;
+
+	if (data != '\r') {
+		commandBuffer[bufferIndex] = data;
+		bufferIndex++;
+		return;
+	}
+
+	commandBuffer[bufferIndex] = '\0';
+	bufferIndex = 0;
+	
+	char* token = strtok(commandBuffer, " ");
+	
+	if (strcmp(token, "set") == 0) {
+		token = strtok(NULL, " ");
+		
+		if (token == NULL) {
+			// Отсутствует аргумент
+
+		} else if (strcmp(token, "auto") == 0) {
+			// Выставлена автоматическая скорость
+			currentMode = AUTO;
+		} else {
+			uint8_t speed = atoi(token);
+			
+			if (speed == 0 && token != '0') {
+				// В строке не число
+				
+			} else {
+				// Получили скорость от пользователя
+				currentMode = MANUAL;
+				if (speed > 100) speed = 100;
+				currentSpeed = speed;
+				return;
+			}
+		}
+	} else {
+		// Ввели не set
+	}
+		
+}
 
 // Выводит на LCD одну цифру, являющуюся результатом деления нацело dig на sub.
 // Возвращает остаток этого деления
@@ -79,9 +135,22 @@ void printFanSpeedPartToScreen(uint8_t fanSpeedPart) {
 	lcdRawSendByte('%', LCD_DATA);
 }
 
+void printFanModeToScreen() {
+	lcdGotoXY(1, 13);
+	if (currentMode == AUTO) {
+		char autoMode[] = "a";
+		lcdPuts(autoMode);
+	} else if (currentMode == MANUAL) {
+		char manualMode[] = "m";
+		lcdPuts(manualMode);
+	}
+}
+
 void handleScratchpad(const uint8_t* scratchpad) {
 	uint8_t msb = scratchpad[1];
 	uint8_t lsd = scratchpad[0];
+
+	lcdClear();
 
 	// Выводим температуру на экран
 	printTempToSreen(msb, lsd);
@@ -91,16 +160,16 @@ void handleScratchpad(const uint8_t* scratchpad) {
 	if (temp < 0) {
 		// Обработка ошибки отрицательной температуры
 		
-		return;
-	}
-	
-	// Получаем проценты оборотов кулера по температуре
-	// Кастуем к uint8_t так как выше проверили, что temp >= 0
-	uint8_t fanSpeedPart = getFanSpeedPart((uint8_t)temp);
-	setFanSpeed(fanSpeedPart);
+	} else {
+		// Получаем проценты оборотов кулера по температуре
+		// Кастуем к uint8_t так как выше проверили, что temp >= 0
+		uint8_t fanSpeedPart = (currentMode == AUTO ? getFanSpeedPart((uint8_t)temp) : currentSpeed);
+		setFanSpeed(fanSpeedPart);
 
-	// Выводим проценты оборотов кулера
-	printFanSpeedPartToScreen(fanSpeedPart);
+		// Выводим проценты оборотов кулера
+		printFanSpeedPartToScreen(fanSpeedPart);
+		printFanModeToScreen();
+	}
 }
 
 int main(void)
@@ -123,6 +192,13 @@ int main(void)
 	 * Инициализация ШИМ
 	 */
 	initFan(25);
+
+	/** 
+	 * Инициализация UART
+	 */
+	initUSART();
+
+	sei();
 
 	while(1)
 	{
@@ -178,6 +254,6 @@ int main(void)
 			// Не найдено устройств
 		}
 		// Разделитель обработок
-		_delay_ms(10);
+		_delay_ms(1000);
 	}
 }
