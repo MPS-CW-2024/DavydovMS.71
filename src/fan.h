@@ -14,4 +14,4 @@
 uint16_t initFan(uint8_t percent);
 uint16_t setFanSpeed(uint8_t percent);
 
-#endif
+#endif /* FAN_H_ */
